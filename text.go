@@ -70,16 +70,16 @@ func FmtInt(n int64) string {
 	return b.String()
 }
 
-// TruncMid fits s into w cells by cutting out its middle, which keeps both
-// the start and the extension of a long name.
+// TruncMid shortens s to w cells by cutting the middle, so the start and
+// the end (dates, extensions, a trailing /) stay visible.
 func TruncMid(s string, w int) string {
 	sw := ansi.StringWidth(s)
-	if sw <= w || w < 3 {
+	if sw <= w {
 		return s
 	}
-	keep := w - 1
-	head := keep / 2
-	return ansi.Truncate(s, head, "") + "…" + ansi.TruncateLeft(s, sw-(keep-head), "")
+	head := (w - 1) / 2
+	tail := w - 1 - head
+	return ansi.Truncate(s, head, "") + "…" + ansi.TruncateLeft(s, sw-tail, "")
 }
 
 // FmtSize writes a byte count in binary units: 512 B, 1.5 KiB, 3.0 GiB.

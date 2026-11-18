@@ -26,6 +26,10 @@ type Shell[S comparable] struct {
 	StatusErr bool
 	// Brief turns an error into its status line form; nil is ShortErr.
 	Brief func(error) string
+	// StatusTTL clears a status message after this long (errors after
+	// twice as long); 0 keeps it until it is replaced. See Expire.
+	StatusTTL time.Duration
+	statusSeq int
 
 	quitArmed bool
 }
@@ -60,6 +64,23 @@ func (s *Shell[S]) Fail(what string, err error, attrs ...any) bool {
 	}
 	s.SetStatus(what+": "+brief(err)+"  (E: error log)", true)
 	return true
+}
+
+type statusExpiredMsg struct{ seq int }
+
+// Expire starts the timer that clears a new status message; prev is the
+// message before the update. Call it at the end of every Update when
+// StatusTTL is set.
+func (s *Shell[S]) Expire(prev string) tea.Cmd {
+	if s.StatusTTL <= 0 || s.Status == prev || s.Status == "" {
+		return nil
+	}
+	s.statusSeq++
+	seq, ttl := s.statusSeq, s.StatusTTL
+	if s.StatusErr {
+		ttl *= 2
+	}
+	return tea.Tick(ttl, func(time.Time) tea.Msg { return statusExpiredMsg{seq} })
 }
 
 // Quit is q: at the top level, or where the app says it is at home, it

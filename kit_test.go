@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -254,12 +255,81 @@ func TestTitleAndText(t *testing.T) {
 	if !strings.Contains(bar, "…") || !strings.HasSuffix(strings.TrimSpace(bar), "file.csv") {
 		t.Errorf("title = %q", bar)
 	}
-	if got := TruncMid("abcdefghij", 5); got != "ab…ij" {
-		t.Errorf("TruncMid = %q", got)
+	for _, c := range []struct {
+		fn   func(string, int) string
+		in   string
+		w    int
+		want string
+	}{
+		{TruncMid, "short", 10, "short"},
+		{TruncMid, "export-2024-05-17.parquet", 13, "export…arquet"},
+		{TruncMid, "abcdef", 1, "…"},
+		{TruncLeft, "s3://bucket/a/b/c/", 10, "…et/a/b/c/"},
+		{TruncLeft, "short", 10, "short"},
+	} {
+		if got := c.fn(c.in, c.w); got != c.want {
+			t.Errorf("trunc(%q, %d) = %q, want %q", c.in, c.w, got, c.want)
+		}
 	}
 	for n, want := range map[int64]string{512: "512 B", 1536: "1.5 KiB", 3 << 30: "3.0 GiB"} {
 		if got := FmtSize(n); got != want {
 			t.Errorf("FmtSize(%d) = %q", n, got)
 		}
+	}
+}
+
+func TestCommandLineTabOnlyAndArgument(t *testing.T) {
+	lookups := 0
+	c := CommandLine[*ctx]{CompleteOnTab: true, Commands: cmdline.Set[*ctx, tea.Cmd]{
+		{Name: "ssh", Args: "<host>", Run: func(*ctx, string) tea.Cmd { return nil },
+			Complete: func(*ctx, string) []cmdline.Item { lookups++; return nil }},
+		{Name: "start", Run: func(*ctx, string) tea.Cmd { return nil }},
+	}}
+	x, p := &ctx{}, NewPrompt[int]()
+	press := func(k string) {
+		msg := tea.KeyPressMsg{Code: []rune(k)[0], Text: k}
+		if k == "tab" {
+			msg = tea.KeyPressMsg{Code: tea.KeyTab}
+		}
+		HandleCommandKey(&c, x, &p, msg)
+	}
+	p.Open(1, ModeCommand, ":", "", "")
+	c.Open(x)
+	press("s")
+	press("s")
+	if len(c.Line.Items) != 0 {
+		t.Fatalf("looked up while typing: %+v", c.Line.Items)
+	}
+	press("tab")
+	if p.Value() != "ssh" {
+		t.Fatalf("tab: %q", p.Value())
+	}
+	press("tab") // the name is complete: on to the argument
+	if p.Value() != "ssh " {
+		t.Fatalf("second tab: %q", p.Value())
+	}
+	press("tab")
+	if lookups != 1 {
+		t.Errorf("argument completer ran %d times", lookups)
+	}
+}
+
+func TestStatusExpires(t *testing.T) {
+	s := NewShell(TokyoNight, 0)
+	if s.Expire("") != nil {
+		t.Error("timer without a TTL")
+	}
+	s.StatusTTL = time.Second
+	s.SetStatus("saved", false)
+	if s.Expire("") == nil || s.Expire("saved") != nil {
+		t.Fatal("timer only for a new message")
+	}
+	s.Update(statusExpiredMsg{s.statusSeq - 1}) // an older message's timer
+	if s.Status != "saved" {
+		t.Fatal("stale timer cleared the status")
+	}
+	s.Update(statusExpiredMsg{s.statusSeq})
+	if s.Status != "" {
+		t.Fatalf("status = %q", s.Status)
 	}
 }

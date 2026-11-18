@@ -16,13 +16,31 @@ type CommandLine[C any] struct {
 	Line     cmdline.Line
 	// Goto handles ":42"; nil reports it as an unknown command.
 	Goto func(ctx C, line int)
+	// CompleteOnTab looks candidates up on tab only, not as the line is
+	// typed: for completers that are slow, e.g. reading files.
+	CompleteOnTab bool
 }
 
 // Placeholder is the hint in an empty command line.
 const Placeholder = "command  (tab: complete, ↑↓: history, :help)"
 
 // Open starts completion; open the prompt with ":" alongside.
-func (c *CommandLine[C]) Open(ctx C) { c.Line.Open(c.Commands.Complete(ctx, "")) }
+func (c *CommandLine[C]) Open(ctx C) {
+	if c.CompleteOnTab {
+		c.Line.Open(nil)
+		return
+	}
+	c.Line.Open(c.Commands.Complete(ctx, ""))
+}
+
+// complete refreshes the candidates for what is typed.
+func (c *CommandLine[C]) complete(ctx C, text string) {
+	if c.CompleteOnTab {
+		c.Line.Close()
+		return
+	}
+	c.Line.SetItems(c.Commands.Complete(ctx, text))
+}
 
 // Key handles a key of the open command line. closed is set when the
 // line closed; submit is then what was entered, if anything, to Run once
@@ -44,6 +62,18 @@ func (c *CommandLine[C]) Key(ctx C, in *textinput.Model, msg tea.KeyPressMsg) (c
 		if k == "shift+tab" || k == "ctrl+p" {
 			dir = -1
 		}
+		if c.CompleteOnTab && !c.Line.Cycling() {
+			c.Line.SetItems(c.Commands.Complete(ctx, in.Value()))
+		}
+		if items := c.Line.Items; len(items) == 1 && items[0].Value == strings.TrimSpace(in.Value()) {
+			// the name is complete: move on to its argument
+			if cmd, err := c.Commands.Resolve(items[0].Value); err == nil && cmd.Args != "" && !strings.HasSuffix(in.Value(), " ") {
+				in.SetValue(items[0].Value + " ")
+				in.CursorEnd()
+			}
+			c.complete(ctx, in.Value())
+			return false, "", nil
+		}
 		if val, ok := c.Line.Cycle(dir); ok {
 			in.SetValue(val)
 			in.CursorEnd()
@@ -57,7 +87,7 @@ func (c *CommandLine[C]) Key(ctx C, in *textinput.Model, msg tea.KeyPressMsg) (c
 		if val, ok := c.Line.Recall(dir); ok {
 			in.SetValue(val)
 			in.CursorEnd()
-			c.Line.SetItems(c.Commands.Complete(ctx, val))
+			c.complete(ctx, val)
 		}
 		return false, "", nil
 	case "backspace":
@@ -67,7 +97,7 @@ func (c *CommandLine[C]) Key(ctx C, in *textinput.Model, msg tea.KeyPressMsg) (c
 		}
 	}
 	*in, cmd = in.Update(msg)
-	c.Line.SetItems(c.Commands.Complete(ctx, in.Value()))
+	c.complete(ctx, in.Value())
 	return false, "", cmd
 }
 

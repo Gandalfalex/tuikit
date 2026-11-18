@@ -96,6 +96,9 @@ func (o *Ops) Spinner() string {
 	return o.spin.View() + " " + o.what
 }
 
+// Frame is the spinner alone, for showing progress elsewhere.
+func (o *Ops) Frame() string { return o.spin.View() }
+
 // Tick keeps the spinner turning while an operation runs; call it after
 // every Update.
 func (o *Ops) Tick() tea.Cmd {

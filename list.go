@@ -1,6 +1,7 @@
 package tuikit
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -20,9 +21,12 @@ type List[T any] struct {
 
 	// Key identifies an entry, for keeping the cursor on it.
 	Key func(T) string
-	// Match reports whether an entry passes a non-empty filter; nil
+	// Match turns a non-empty filter into the test entries must pass; it
+	// is called once per refilter, so a filter can be parsed there. nil
 	// matches Key smart-case.
-	Match func(item T, filter string) bool
+	Match func(filter string) func(T) bool
+	// Compare orders the entries; nil keeps them as given.
+	Compare func(a, b T) int
 	// Hidden entries are left out unless ShowHidden is set or a filter is
 	// typed, which finds them too; nil hides nothing.
 	Hidden func(T) bool
@@ -34,7 +38,56 @@ func NewList[T any](key func(T) string) List[T] { return List[T]{Key: key} }
 // Set replaces the entries, keeping the filter.
 func (l *List[T]) Set(items []T) {
 	l.All = items
+	l.sort()
 	l.Refilter()
+}
+
+// Resort orders the entries again after Compare changed, keeping the
+// cursor on the entry under it.
+func (l *List[T]) Resort() {
+	cur, ok := l.Current()
+	l.sort()
+	l.Refilter()
+	if ok {
+		l.Select(l.Key(cur))
+	}
+}
+
+func (l *List[T]) sort() {
+	if l.Compare != nil {
+		slices.SortStableFunc(l.All, l.Compare)
+	}
+}
+
+// Append adds entries, merged into place when the list is sorted, keeping
+// the cursor on the entry under it. It is for streamed results: O(n) per
+// batch.
+func (l *List[T]) Append(items []T) {
+	if len(items) == 0 {
+		return
+	}
+	cur, ok := l.Current()
+	if l.Compare == nil {
+		l.All = append(l.All, items...)
+	} else {
+		slices.SortStableFunc(items, l.Compare)
+		merged := make([]T, 0, len(l.All)+len(items))
+		i, j := 0, 0
+		for i < len(l.All) && j < len(items) {
+			if l.Compare(items[j], l.All[i]) < 0 {
+				merged = append(merged, items[j])
+				j++
+			} else {
+				merged = append(merged, l.All[i])
+				i++
+			}
+		}
+		l.All = append(append(merged, l.All[i:]...), items[j:]...)
+	}
+	l.Refilter()
+	if ok {
+		l.Select(l.Key(cur))
+	}
 }
 
 // SetFilter replaces the filter and moves the cursor to the first match.
@@ -47,22 +100,23 @@ func (l *List[T]) SetFilter(f string) {
 // Refilter recomputes Vis after entries or the filter changed.
 func (l *List[T]) Refilter() {
 	l.Vis = l.Vis[:0]
+	var match func(T) bool
+	switch {
+	case l.Filter == "":
+	case l.Match != nil:
+		match = l.Match(l.Filter)
+	default:
+		match = func(e T) bool { return SmartMatch(l.Key(e), l.Filter) }
+	}
 	for i, e := range l.All {
 		if l.Hidden != nil && !l.ShowHidden && l.Filter == "" && l.Hidden(e) {
 			continue
 		}
-		if l.Filter == "" || l.match(e) {
+		if match == nil || match(e) {
 			l.Vis = append(l.Vis, i)
 		}
 	}
 	l.Clamp(len(l.Vis))
-}
-
-func (l *List[T]) match(e T) bool {
-	if l.Match != nil {
-		return l.Match(e, l.Filter)
-	}
-	return SmartMatch(l.Key(e), l.Filter)
 }
 
 // Current is the entry under the cursor.

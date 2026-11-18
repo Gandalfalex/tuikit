@@ -27,6 +27,24 @@ func TitleBar(th Theme, w int, app string, parts ...string) string {
 	return ansi.Truncate(strings.Join(all, th.Muted.Render(" › ")), w, "…")
 }
 
+// TitleBarPath is TitleBar with a path among the parts (before, path,
+// after) that, when the bar is too wide, is cut from the left: its deepest
+// part is the one that matters.
+func TitleBarPath(th Theme, w int, app string, before []string, path string, after []string) string {
+	parts := func(p string) []string {
+		out := append([]string(nil), before...)
+		if p != "" {
+			out = append(out, th.Crumb.Render(p))
+		}
+		return append(out, after...)
+	}
+	s := TitleBar(th, 1<<30, app, parts(path)...)
+	if over := lipgloss.Width(s) - w; over > 0 && path != "" {
+		s = TitleBar(th, 1<<30, app, parts(TruncLeft(path, max(8, lipgloss.Width(path)-over)))...)
+	}
+	return ansi.Truncate(s, w, "…")
+}
+
 // StatusBar is the mode badge and parts separated by bars.
 func StatusBar(th Theme, w int, mode Mode, parts []string) string {
 	line := th.Mode.Background(mode.Color).Render(mode.Name)

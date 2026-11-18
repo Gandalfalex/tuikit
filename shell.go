@@ -24,6 +24,8 @@ type Shell[S comparable] struct {
 
 	Status    string
 	StatusErr bool
+	// Brief turns an error into its status line form; nil is ShortErr.
+	Brief func(error) string
 
 	quitArmed bool
 }
@@ -52,14 +54,19 @@ func (s *Shell[S]) Fail(what string, err error, attrs ...any) bool {
 	}
 	slog.Error(what, append([]any{"err", err}, attrs...)...)
 	s.Errors.Add(what, err)
-	s.SetStatus(what+": "+ShortErr(err)+"  (E: error log)", true)
+	brief := ShortErr
+	if s.Brief != nil {
+		brief = s.Brief
+	}
+	s.SetStatus(what+": "+brief(err)+"  (E: error log)", true)
 	return true
 }
 
-// Quit is q: at the top level it quits, deeper it must be pressed twice so
-// a stray q does not drop what was opened.
-func (s *Shell[S]) Quit() tea.Cmd {
-	if s.Stack.Len() == 1 || s.quitArmed {
+// Quit is q: at the top level, or where the app says it is at home, it
+// quits; deeper it must be pressed twice so a stray q does not drop what
+// was opened.
+func (s *Shell[S]) Quit(home bool) tea.Cmd {
+	if home || s.Stack.Len() == 1 || s.quitArmed {
 		return tea.Quit
 	}
 	s.quitArmed = true

@@ -44,7 +44,9 @@ type item struct{ name, text string }
 func TestList(t *testing.T) {
 	l := NewList(func(i item) string { return i.name })
 	l.Hidden = func(i item) bool { return strings.HasPrefix(i.name, "sys") }
-	l.Match = func(i item, f string) bool { return SmartMatch(i.name, f) || SmartMatch(i.text, f) }
+	l.Match = func(f string) func(item) bool {
+		return func(i item) bool { return SmartMatch(i.name, f) || SmartMatch(i.text, f) }
+	}
 	l.Set([]item{{"app", "orders"}, {"sys", ""}, {"hr", "people"}})
 	if len(l.Vis) != 2 || l.HiddenCount() != 1 {
 		t.Fatalf("vis = %v, hidden = %d", l.Vis, l.HiddenCount())
@@ -85,12 +87,16 @@ func TestStack(t *testing.T) {
 	if s.Stack.Len() != 1 || s.Stack.Top() != 0 {
 		t.Errorf("after pops: %v", s.Stack.Items())
 	}
-	if s.Quit() == nil {
+	if s.Quit(false) == nil {
 		t.Error("q at the top level does not quit")
 	}
 	s.Stack.Push(1)
-	if s.Quit() != nil || s.Quit() == nil {
+	if s.Quit(false) != nil || s.Quit(false) == nil {
 		t.Error("q below the top level must be pressed twice")
+	}
+	s.Disarm()
+	if s.Quit(true) == nil {
+		t.Error("q at home does not quit")
 	}
 }
 
@@ -212,5 +218,48 @@ func TestEditorHelpers(t *testing.T) {
 	}
 	if VimString("it's") != "'it''s'" || LuaString("a]]b") != "[=[a]]b]=]" || VimEscape("a b%") != `a\ b\%` {
 		t.Error("quoting")
+	}
+}
+
+func TestSortedList(t *testing.T) {
+	l := NewList(func(s string) string { return s })
+	l.Compare = strings.Compare
+	l.Set([]string{"d", "b"})
+	l.Select("d")
+	l.Append([]string{"c", "a", "e"})
+	if strings.Join(l.All, "") != "abcde" {
+		t.Errorf("merged = %v", l.All)
+	}
+	if e, _ := l.Current(); e != "d" {
+		t.Errorf("cursor moved to %q", e)
+	}
+	l.Compare = func(a, b string) int { return strings.Compare(b, a) }
+	l.Resort()
+	if strings.Join(l.All, "") != "edcba" || l.Cursor != 1 {
+		t.Errorf("resort = %v, cursor %d", l.All, l.Cursor)
+	}
+	calls := 0
+	l.Match = func(f string) func(string) bool {
+		calls++
+		return func(s string) bool { return s >= f }
+	}
+	l.SetFilter("c")
+	if calls != 1 || len(l.Vis) != 3 {
+		t.Errorf("filter compiled %d times, vis = %v", calls, l.Vis)
+	}
+}
+
+func TestTitleAndText(t *testing.T) {
+	bar := ansi.Strip(TitleBarPath(TokyoNight, 30, "app", []string{"prof"}, "s3://bucket/very/deep/path/file.csv", nil))
+	if !strings.Contains(bar, "…") || !strings.HasSuffix(strings.TrimSpace(bar), "file.csv") {
+		t.Errorf("title = %q", bar)
+	}
+	if got := TruncMid("abcdefghij", 5); got != "ab…ij" {
+		t.Errorf("TruncMid = %q", got)
+	}
+	for n, want := range map[int64]string{512: "512 B", 1536: "1.5 KiB", 3 << 30: "3.0 GiB"} {
+		if got := FmtSize(n); got != want {
+			t.Errorf("FmtSize(%d) = %q", n, got)
+		}
 	}
 }

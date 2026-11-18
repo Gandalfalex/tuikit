@@ -32,4 +32,3 @@ type model struct {
 }
 ```
 
-Used by dbreader; s3reader and gdocker are next.

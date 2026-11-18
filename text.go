@@ -70,6 +70,32 @@ func FmtInt(n int64) string {
 	return b.String()
 }
 
+// TruncMid fits s into w cells by cutting out its middle, which keeps both
+// the start and the extension of a long name.
+func TruncMid(s string, w int) string {
+	sw := ansi.StringWidth(s)
+	if sw <= w || w < 3 {
+		return s
+	}
+	keep := w - 1
+	head := keep / 2
+	return ansi.Truncate(s, head, "") + "…" + ansi.TruncateLeft(s, sw-(keep-head), "")
+}
+
+// FmtSize writes a byte count in binary units: 512 B, 1.5 KiB, 3.0 GiB.
+func FmtSize(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return strconv.FormatInt(n, 10) + " B"
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return strconv.FormatFloat(float64(n)/float64(div), 'f', 1, 64) + " " + string("KMGTPE"[exp]) + "iB"
+}
+
 // FmtDur rounds a duration to what is worth reading in a status line.
 func FmtDur(d time.Duration) string {
 	switch {
